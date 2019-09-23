@@ -1,6 +1,7 @@
 # import the necessary packages
 from VisualCortex.CountPeople.centroidtracker import CentroidTracker
 from VisualCortex.CountPeople.trackableobject import TrackableObject
+from Config.Config import Config
 from imutils.video import VideoStream
 from imutils.video import FPS
 import numpy as np
@@ -13,6 +14,12 @@ import os
 
 
 def be_aware_of_surroundings(thread_name, config, args):
+	# check that recognizer and microphone arguments are appropriate type
+	if not isinstance(config, Config):
+		raise TypeError("`recognizer` must be `Config` instance")
+
+	print("Started listening on thread %s" % thread_name)
+
 	# initialize the list of class labels MobileNet SSD was trained to
 	# detect
 	CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
@@ -51,8 +58,7 @@ def be_aware_of_surroundings(thread_name, config, args):
 	# load our serialized face detector from disk
 	print("[INFO] loading face detector...")
 	protoPath = os.path.sep.join([args["detector"], "deploy.prototxt"])
-	modelPath = os.path.sep.join([args["detector"],
-		"res10_300x300_ssd_iter_140000.caffemodel"])
+	modelPath = os.path.sep.join([args["detector"], "res10_300x300_ssd_iter_140000.caffemodel"])
 	detector = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
 
 	# load our serialized face embedding model from disk
@@ -107,7 +113,7 @@ def be_aware_of_surroundings(thread_name, config, args):
 		detector.setInput(imageBlob)
 		detections = detector.forward()
 
-		no_faces_available = True
+		config.no_faces_available = True
 		# loop over the detections
 		for i in range(0, detections.shape[2]):
 			# extract the confidence (i.e., probability) associated with
@@ -139,8 +145,7 @@ def be_aware_of_surroundings(thread_name, config, args):
 				# construct a blob for the face ROI, then pass the blob
 				# through our face embedding model to obtain the 128-d
 				# quantification of the face
-				faceBlob = cv2.dnn.blobFromImage(face, 1.0 / 255,
-												 (96, 96), (0, 0, 0), swapRB=True, crop=False)
+				faceBlob = cv2.dnn.blobFromImage(face, 1.0 / 255, (96, 96), (0, 0, 0), swapRB=True, crop=False)
 				embedder.setInput(faceBlob)
 				vec = embedder.forward()
 
@@ -150,22 +155,26 @@ def be_aware_of_surroundings(thread_name, config, args):
 				proba = preds[j]
 				name = le.classes_[j]
 
+				if proba >= config.face_probability:
+					if name not in config.faces_detected:
+						config.faces_detected.append(name)
+
 				# draw the bounding box of the face along with the
 				# associated probability
 				text = "{}: {:.2f}%".format(name, proba * 100)
 				y = startY - 10 if startY - 10 > 10 else startY + 10
-				cv2.rectangle(frame, (startX, startY), (endX, endY),
-							  (0, 0, 255), 2)
-				cv2.putText(frame, text, (startX, y),
-							cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 2)
+				cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 0, 255), 2)
+				cv2.putText(frame, text, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 2)
 
 			if face_detected:
-				no_faces_available = False
+				config.no_faces_available = False
 			# else:
 			# 	no_faces_available = False
 				# continue
 
-		if no_faces_available:
+		if config.no_faces_available:
+
+			config.faces_detected = []
 
 			rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 			# if the frame dimensions are empty, set them
@@ -176,8 +185,7 @@ def be_aware_of_surroundings(thread_name, config, args):
 			# the writer
 			if args["output"] is not None and writer is None:
 				fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-				writer = cv2.VideoWriter(args["output"], fourcc, 30,
-					(W, H), True)
+				writer = cv2.VideoWriter(args["output"], fourcc, 30, (W, H), True)
 
 			# initialize the current status along with our list of bounding
 			# box rectangles returned by either (1) our object detector or
@@ -253,14 +261,11 @@ def be_aware_of_surroundings(thread_name, config, args):
 					# add the bounding box coordinates to the rectangles list
 					rects.append((startX, startY, endX, endY))
 
-			# draw a horizontal line in the center of the frame -- once an
-			# object crosses this line we will determine whether they were
-			# moving 'up' or 'down'
-			# cv2.line(frame, (W // 2, 0), (W // 2, H), (0, 255, 255), 2)
-
 			# use the centroid tracker to associate the (1) old object
 			# centroids with (2) the newly computed object centroids
 			objects = ct.update(rects)
+
+			config.people_available = len(objects.items())
 
 			# loop over the tracked objects
 			for (objectID, centroid) in objects.items():
@@ -272,35 +277,6 @@ def be_aware_of_surroundings(thread_name, config, args):
 				if to is None:
 					to = TrackableObject(objectID, centroid)
 
-				# # otherwise, there is a trackable object so we can utilize it
-				# # to determine direction
-				# else:
-				# 	# the difference between the y-coordinate of the *current*
-				# 	# centroid and the mean of *previous* centroids will tell
-				# 	# us in which direction the object is moving (negative for
-				# 	# 'up' and positive for 'down')
-				# 	# y = [c[1] for c in to.centroids]
-				# 	x = [c[0] for c in to.centroids]
-				# 	direction = centroid[0] - np.mean(x)
-				# 	# direction = centroid[1] - np.mean(y)
-				# 	to.centroids.append(centroid)
-				#
-				# 	# check to see if the object has been counted or not
-				# 	if not to.counted:
-				# 		# if the direction is negative (indicating the object
-				# 		# is moving up) AND the centroid is above the center
-				# 		# line, count the object
-				# 		if direction < 0 and centroid[0] < W // 2:
-				# 			totalUp += 1
-				# 			to.counted = True
-				#
-				# 		# if the direction is positive (indicating the object
-				# 		# is moving down) AND the centroid is below the
-				# 		# center line, count the object
-				# 		elif direction > 0 and centroid[0] > W // 2:
-				# 			totalDown += 1
-				# 			to.counted = True
-
 				# store the trackable object in our dictionary
 				trackableObjects[objectID] = to
 
@@ -308,7 +284,7 @@ def be_aware_of_surroundings(thread_name, config, args):
 				# object on the output frame
 				text = "ID {}".format(objectID)
 				cv2.putText(frame, text, (centroid[0] - 10, centroid[1] - 10),
-					cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+							cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 				cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
 
 			# construct a tuple of information we will be displaying on the

@@ -1,5 +1,11 @@
 .idea/
 Media/
 VisualCortex/CountPeople/dataset/
+VisualCortex/CountPeople/__pycache__/
 AudioCortex/files/
 AudioCortex/gui/
+AudioCortex/__pycache__/
+Config/__pycache__
+VisualCortex/__pycache__/
+*.pyc
+*.pickle

@@ -16,49 +16,20 @@ import sys
 import math
 
 #---------Motion detection and face recognition-----------
-		
-# Capture a small test image (for motion detection)
-# Keep image in RAM until we need to do face recognition
-def captureTestImage():
-	command = "raspistill -w %s -h %s -t 1 -n -vf -e bmp -o -" % (100, 75)
-	imageData = io.StringIO()
-	imageData.write(subprocess.check_output(command, shell=True))
-	imageData.seek(0)
-	im = Image.open(imageData)
-	buffer = im.load()
-	imageData.close()
-	return im, buffer
 
+def recognize_face(config):
+	num_faces = len(config.faces_detected)
+	print("Detected " + str(num_faces) + " faces.")
+	iii = 0
 
-# Probe Sky Biometry for Face recognization
-def recognize_face(theImg,filenameFull):
-	font = ImageFont.truetype("/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans-Bold.ttf", 14)
-	theFileLocation =  "http://" + config.publicIP + "/temp.jpg"
-	# client = FaceClient(keyring.get_password('skybio','api_key'),keyring.get_password('skybio','api_secret'))
-	img = Image.open(theImg)
-	width, height = img.size
-	draw = ImageDraw.Draw(img)
-	print(theFileLocation)
-	photo = client.faces_recognize('all',theFileLocation, namespace='python')
-	print(photo)
-	# Number of people in photo
-	numFaces = len(photo['photos'][0]['tags'])
-	print("Detected " + str(numFaces) + " faces.")
-	textCaption = ""
-	iii=0
-
-	theSpeech = ""
-	while iii < numFaces:
+	the_speech = ""
+	while iii < num_faces:
 		for person in config.personList:
-#			try:
-				theId = photo['photos'][0]['tags'][iii]['uids'][0]['uid']
-				foundName = theId
-				print("I see " + foundName)
-				xPos = width*(int(photo['photos'][0]['tags'][iii]['eye_right']['x']))/100
-				yPos = height*(int(photo['photos'][0]['tags'][iii]['eye_right']['y']))/100
-				# and photo['photos'][0]['tags'][iii]['attributes']['gender']['value'] == person.gender:
-				if person.name in foundName:
-					theSpeech = theSpeech + "%s" % person.greeting
+			try:
+				found_name = config.faces_detected[iii]
+				print("I see " + found_name)
+				if person.name in found_name:
+					the_speech = the_speech + "%s" % person.greeting
 
 					timeDifference = datetime.datetime.now() - person.lastSeen
 					person.lastSeen = datetime.datetime.now()
@@ -67,43 +38,28 @@ def recognize_face(theImg,filenameFull):
 					hours = math.floor(timeDifference.total_seconds() / 60 / 60	)	
 					minutes = math.floor(timeDifference.total_seconds() / 60 )	
 					if days > 0:
-						theSpeech = theSpeech + "It's been %d days since I have seen you, %s. " % (days, person.name)
+						the_speech = the_speech + "It's been %d days since I have seen you, %s. " % (days, person.name)
 					elif hours > 4:
-						theSpeech = theSpeech + "It's been %d hours since I have seen you, %s. " % (hours, person.name)
+						the_speech = the_speech + "It's been %d hours since I have seen you, %s. " % (hours, person.name)
 					elif minutes > 0:
-						theSpeech = theSpeech + "It's been %d minutes since I have seen you, %s. " % (minutes, person.name)
-					draw.text((xPos, yPos), person.name, (255, 255, 0), font=font)
-					draw.text((0, 0), time.strftime("%c"), (255, 255, 0), font=font)
-					collection = ['eyes', 'sadness', 'mood', 'glasses']
-					for x in collection:
-						try:
-							eyes = photo['photos'][0]['tags'][iii]['attributes'][x]['value']
-							conf = photo['photos'][0]['tags'][iii]['attributes'][x]['confidence']
-							if conf > 20:
-								print(" " + x + " = " + eyes)
-								yPos = yPos + 20
-								draw.text((xPos, yPos), " " + x + ": " + eyes, (255, 255, 0), font=font)
-								if x == 'mood':
-									theSpeech = theSpeech + "Why are you " + eyes + "? "		
-						except:
-							print("No " + x)
+						the_speech = the_speech + "It's been %d minutes since I have seen you, %s. " % (minutes, person.name)
+
 			except:
 				print("Error locating face in person database.")
 				print("Unexpected error:", sys.exc_info()[0])
 				raise
 		iii = iii + 1
 	
-	if len(theSpeech) > 2: # proxy for if something happened
-		img.save(filenameFull)
-		img.save("/var/www/face.jpg")
+	if len(the_speech) > 2:
+		# proxy for if something happened
 		pickle.dump(config.personList, open("ai_data/personlist.p", "wb"))
-	return theSpeech
+	return the_speech
 
 
 # Check whether a face has been seen recently
-def seen_a_face_in_a_while():
+def seen_a_face_in_a_while(config):
 	# first check if anybody has been seen
-	has_seen_someone = 0
+	has_seen_someone = False
 	for person in config.personList:
 		timeDifference = datetime.datetime.now() - person.lastSeen
 		# personList[j].lastSeen = person.lastSeen
@@ -111,36 +67,31 @@ def seen_a_face_in_a_while():
 		hours = round(timeDifference.total_seconds() / 60 / 60	)	
 		minutes = round(timeDifference.total_seconds() / 60)
 		if minutes < 10 and days < 1 and hours < 1:
-			has_seen_someone = 1
+			has_seen_someone = True
 	return has_seen_someone
 
 
 # Save a full size image to disk
-def save_image():
-	keep_disk_space_free(config.diskSpaceToReserve)
-	time = datetime.datetime.now()
-	filenameFull = config.filepath + config.filenamePrefix + "-%04d%02d%02d%02d%02d%02d" % (time.year, time.month, time.day, time.hour, time.minute, time.second)+ "." + config.fileType
-	
-	# save onto webserver
-	filename = "/var/www/temp.jpg"
-	subprocess.call("sudo raspistill -w "+ str(config.saveWidth) +" -h "+ str(config.saveHeight) + " -t 1 -n -vf -e " + config.fileType + " -q 15 -o %s" % filename, shell=True)
-	print("Captured image: %s" % filename)
+def save_image(config):
+	# keep_disk_space_free(config)
+	time_ = datetime.datetime.now()
 
-	theSpeech = recognizeFace(filename,filenameFull)
+	theSpeech = recognize_face(config)
 	if len(theSpeech) > 2:
 		print(theSpeech)
-		saySomething(theSpeech, "en")
-		config.lookForFaces = 0
+		# saySomething(theSpeech, "en")
+		config.lookForFaces = False
 
 
 # Keep free space above given level
-def keep_disk_space_free(bytesToReserve):
-	if get_free_space() < bytesToReserve:
+def keep_disk_space_free(config):
+	bytes_to_reserve = config.diskSpaceToReserve
+	if get_free_space() < bytes_to_reserve:
 		for filename in sorted(os.listdir(".")):
 			if filename.startswith(config.filenamePrefix) and filename.endswith("." + config.fileType):
 				os.remove(filename)
 				print("Deleted %s to avoid filling disk" % filename)
-				if (getFreeSpace() > bytesToReserve):
+				if get_free_space() > bytes_to_reserve:
 					return
 
 
@@ -153,91 +104,46 @@ def get_free_space():
 
 def look_at_surroundings(threadName, config):
 	# check that recognizer and microphone arguments are appropriate type
-	if not isinstance(config, Config.Config):
+	if not isinstance(config, Config):
 		raise TypeError("`recognizer` must be `Config` instance")
 
 	motionDetectedLast = datetime.datetime.now()
 	motionDetectedNow = datetime.datetime.now()
 	print("Started listening on thread %s" % threadName)
 
-	## look at surroundings
-	# Get first image
-	image1, buffer1 = captureTestImage()
-	# Reset last capture time
+	# look at surroundings
 	lastCapture = time.time()
 
 	while True:
 		# check if CPU intensive processes are running
-		output = os.popen("pgrep vlc").read()
-		isRunning = 0
-		if len(output) > 0:
-			isRunning = 1
-#		if config.gettingStillImages and config.gettingStillAudio:
-#			if config.timeTimeout == 0:
-#				config.timeTimeout = 10 
-#			print "No one is around, closing eyes for %d seconds" % config.timeTimeout
-#			time.sleep(config.timeTimeout)
-#			config.gettingStillImages = 0
-#			motionDetectedLast = datetime.datetime.now()
+		if config.gettingStillImages and config.gettingStillAudio:
+			if config.timeTimeout == 0:
+				config.timeTimeout = 10
+			print("No one is around, closing eyes for %d seconds" % config.timeTimeout)
+			time.sleep(config.timeTimeout)
+			config.gettingStillImages = 0
+			motionDetectedLast = datetime.datetime.now()
+
 		if config.gettingVoiceInput:
 			time.sleep(6)
-		elif isRunning:
-			time.sleep(20)
 		else:
-			# Get comparison image
-			image2, buffer2 = captureTestImage()
-			pixelSum = 0
-			numCountedPixels = 0
-			motionHasBeenDetected = False
-			# Count changed pixels
-			changedPixels = 0
-			for x in range(0, 100):
-				# Scan one line of image then check sensitivity for movement
-				for y in range(0, 75):
-					# Just check green channel as it's the highest quality channel
-					pixdiff = abs(buffer1[x, y][1] - buffer2[x, y][1])
-					pixelSum += buffer1[x, y][1]
-					numCountedPixels += 1
-					if pixdiff > config.threshold:
-						changedPixels += 1
+			if config.people_available > 0:
+				motionDetectedLast = datetime.datetime.now()
+				motionHasBeenDetected = True
+				config.timeTimeout = 0  # reset timeout
+				if not seen_a_face_in_a_while(config):
+					config.gettingVisualInput = True
+					save_image(config)  # face detection
+					config.gettingVisualInput = False
 
-				# Changed logic - If movement sensitivity exceeded then
-				# Save image and Exit before full image scan complete
-				if changedPixels > config.sensitivity:   
-					lastCapture = time.time()
-					print("Motion detected! changedPixels > sensitivity (" + str(changedPixels) + " > " + str(config.sensitivity) + ")")
-					motionDetectedLast = datetime.datetime.now()
-					motionHasBeenDetected = True
-					config.timeTimeout = 0 # reset timeout
-					if not seenAFaceInAwhile():
-						config.gettingVisualInput = 1
-						saveImage() # face detection
-						config.gettingVisualInput = 0
-					break
-				continue	
+			time_difference = datetime.datetime.now() - motionDetectedLast
 
-			print("Changed pixels : " + str(changedPixels))
-			if numCountedPixels > 500:
-				lightChange = pixelSum / numCountedPixels
-				print("Pixel sum : %2.1f" % lightChange)
-				if lightChange < 5:
-					os.system("echo 'rf a1 on' | nc localhost 1099")
-					os.system("echo 'rf c1 on' | nc localhost 1099")
-
-			# Check force capture
-			if config.forceCapture:
-				if time.time() - lastCapture > config.forceCaptureTime:
-					changedPixels = config.sensitivity + 1
-			# Swap comparison buffers
-			image1  = image2
-			buffer1 = buffer2
-			timeDifference = datetime.datetime.now() - motionDetectedLast
-			minutes = round(timeDifference.total_seconds() / 60 )	
-			if timeDifference.total_seconds() > config.videoHangout:
-				config.gettingStillImages = 1
+			if time_difference.total_seconds() > config.videoHangout:
+				config.gettingStillImages = True
 			else:
-				config.gettingStillImages = 0
+				config.gettingStillImages = False
+
 			if config.lookForFaces:
-				config.gettingVisualInput = 1
-				saveImage() # face detection
-				config.gettingVisualInput = 0
+				config.gettingVisualInput = True
+				save_image(config) # face detection
+				config.gettingVisualInput = False

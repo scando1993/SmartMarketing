@@ -96,7 +96,7 @@ def listen_to_surroundings(thread_name, config):
 				time.sleep(5)
 			else:
 				print("Starting listening stream")
-				lastInterupt = datetime.datetime.now()
+				lastInterupt = time.datetime.now()
 				config.gettingStillAudio = False
 				rmsTemp = 0
 
@@ -111,11 +111,14 @@ def listen_to_surroundings(thread_name, config):
 					data = audio.frame_data
 					rmsTemp = audioop.rms(data, 2)
 					timeDifference = datetime.datetime.now() - lastInterupt
+
 					if timeDifference.total_seconds() > config.audioHangout:
 						config.gettingStillAudio = True
 						volume_threshold = calibrate_ambient_noise()
+
 					if config.gettingStillAudio and config.gettingStillImages:
 						break
+
 				if not config.gettingVisualInput and not config.gettingStillAudio:
 					config.timeTimeout = 0 # reset timeout
 					config.gettingVoiceInput = True

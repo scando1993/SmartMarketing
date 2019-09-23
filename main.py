@@ -1,9 +1,12 @@
 from VisualCortex.visual_cortex import look_at_surroundings
 from VisualCortex.CountPeople.people_counter import be_aware_of_surroundings
 from AudioCortex.audio_cortex import listen_to_surroundings
-from Config.Config import Config
+from Config.Config import Config, Person
 import _thread
 import argparse
+import pickle
+import time
+
 from multiprocessing import Pool, Process
 
 if __name__ == '__main__':
@@ -31,17 +34,37 @@ if __name__ == '__main__':
                     help="path to label encoder")
     args = vars(ap.parse_args())
 
-    config = Config()
+    # make a list of class Person(s)
+    try:
+        personList = pickle.load(open("Ai_data/personlist.p", "rb"))
+    except:
+        personList = []
+        personList.append(Person(name="Kevin", job="Master of Creation"))
+        pickle.dump(personList, open("Ai_data/personlist.p", "wb"))
+
+    config = Config(personList)
 
     try:
-        # p = Process(target=listen_to_surroundings, args=("AudioCortex", config))
-        # p.start()
-        _thread.start_new_thread(listen_to_surroundings, ("AudioCortex", config))
-        # _thread.start_new_thread(look_at_surroundings, ("VisualCortex", config))
-        _thread.start_new_thread(be_aware_of_surroundings, ("VisualCortexAwareness", config, args))
+        # pass
+        # p_audio = Process(target=listen_to_surroundings, args=("AudioCortex", config))
+        # p_audio.start()
+        # p_video = Process(target=look_at_surroundings, args=("VisualCortex", config))
+        # p_video.start()
+        # _thread.start_new_thread(listen_to_surroundings, ("AudioCortex", config))
+        _thread.start_new_thread(look_at_surroundings, ("VisualCortex", config))
+        # _thread.start_new_thread(be_aware_of_surroundings, ("VisualCortexAwareness", config, args))
+
     except :
         print("Error, unable to start thread.")
 
-    while True:
-        pass
+    be_aware_of_surroundings("VisualCortexAwareness", config, args)
+
+    # while True:
+        # if config.no_faces_available:
+        #     print("Hey! Acercate")
+        #     time.sleep(60)
+        # else:
+        #     print("Hola!")
+        #     time.sleep(60)
+        # pass
 
